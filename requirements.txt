@@ -1,0 +1,31 @@
+# Data Manipulation & Math
+numpy
+pandas
+scipy
+
+# Visualization
+matplotlib
+seaborn
+wordcloud
+tabulate
+
+# Image Processing
+Pillow
+
+# Machine Learning (Scikit-Learn)
+scikit-learn
+
+# Deep Learning (TensorFlow/Keras)
+tensorflow>=2.10.0
+
+# Deep Learning (PyTorch)
+torch
+torchvision
+
+# Natural Language Processing
+transformers
+nltk
+textblob
+
+# Deployment / UI
+gradio
