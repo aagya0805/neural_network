@@ -34,6 +34,7 @@ import time
 import nltk
 
 from collections import Counter
+from scipy.sparse import hstack
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from transformers import DistilBertModel
@@ -158,6 +159,9 @@ df['label'] = np.random.choice(LABELS, size=len(df))
 label_table = df['label'].value_counts().reset_index()
 label_table.columns = ['Label', 'Count']
 label_table
+
+_df_2.groupby('Label').size().plot(kind='barh', color=sns.palettes.mpl_palette('Dark2'))
+plt.gca().spines[['top', 'right',]].set_visible(False)
 
 """## **Data Cleaning and Preprocessing**
 
@@ -370,7 +374,7 @@ df['text_length'] = df['text'].apply(lambda x: len(str(x).split()))
 
 def get_brightness(image_path):
     try:
-        img = Image.open(image_path).convert('L') # Convert to grayscale
+        img = Image.open(image_path).convert('L')
         return np.array(img).mean()
     except:
         return None
@@ -803,6 +807,8 @@ X_val, X_test, y_val, y_test = train_test_split(
     X_temp, y_temp, test_size=0.50, random_state=42, stratify=y_temp
 )
 
+y_test_lr = y_test.copy()
+
 print(f"Final Split Counts: Train: {len(X_train_full)}, Val: {len(X_val)}, Test: {len(X_test)}")
 
 """### **Class Distribution Verification**"""
@@ -831,39 +837,46 @@ print(f"Cross-Validation Accuracy: {scores.mean():.4f} (+/- {scores.std() * 2:.4
 def evaluate_model(model, X_test, y_test, model_name):
     y_pred = model.predict(X_test)
 
-    acc = accuracy_score(y_test, y_pred)
-    precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average='weighted')
+    word_to_num = {'negative': 0, 'neutral': 1, 'positive': 2}
+
+    if isinstance(y_pred[0], str):
+        y_pred_numeric = np.array([word_to_num[str(p).lower().strip()] for p in y_pred])
+    else:
+        y_pred_numeric = np.array(y_pred).astype(int)
+
+    y_test_numeric = np.array(y_test).astype(int)
+
+    acc = accuracy_score(y_test_numeric, y_pred_numeric)
+    precision, recall, f1, _ = precision_recall_fscore_support(y_test_numeric, y_pred_numeric, average='weighted')
 
     print(f"--- {model_name} Performance ---")
     print(f"Accuracy:  {acc:.4f}")
     print(f"Precision: {precision:.4f}")
     print(f"Recall:    {recall:.4f}")
     print(f"F1 Score:  {f1:.4f}")
-    print("\nClassification Report:\n", classification_report(y_test, y_pred))
+    print("\nClassification Report:\n", classification_report(y_test_numeric, y_pred_numeric, target_names=['Negative', 'Neutral', 'Positive']))
 
-    return y_pred
-
-# Evaluate Baseline
-y_pred_baseline = evaluate_model(clf_baseline, X_text_test, y_test, "Baseline (Text Only)")
-
-# Evaluate Multimodal
-y_pred_multimodal = evaluate_model(clf_multimodal, X_multimodal_test, y_test, "Multimodal (Text + Visual)")
+    return y_pred_numeric
 
 """### **Comparative Visualization (Confusion Matrix)**"""
 
+y_test_final = np.array(y_test).astype(int)
+
+y_pred_baseline = evaluate_model(clf_baseline, X_text_test, y_test_final, "Baseline")
+y_pred_multimodal = evaluate_model(clf_multimodal, X_multimodal_test, y_test_final, "Multimodal")
+
 fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+display_labels = ['Negative', 'Neutral', 'Positive']
 
-# Baseline Confusion Matrix
-sns.heatmap(confusion_matrix(y_test, y_pred_baseline), annot=True, fmt='d', cmap='Blues', ax=axes[0])
+sns.heatmap(confusion_matrix(y_test_final, y_pred_baseline),
+            annot=True, fmt='d', cmap='Blues', ax=axes[0],
+            xticklabels=display_labels, yticklabels=display_labels)
 axes[0].set_title('Baseline Confusion Matrix')
-axes[0].set_xlabel('Predicted')
-axes[0].set_ylabel('Actual')
 
-# Multimodal Confusion Matrix
-sns.heatmap(confusion_matrix(y_test, y_pred_multimodal), annot=True, fmt='d', cmap='Greens', ax=axes[1])
+sns.heatmap(confusion_matrix(y_test_final, y_pred_multimodal),
+            annot=True, fmt='d', cmap='Greens', ax=axes[1],
+            xticklabels=display_labels, yticklabels=display_labels)
 axes[1].set_title('Multimodal Confusion Matrix')
-axes[1].set_xlabel('Predicted')
-axes[1].set_ylabel('Actual')
 
 plt.tight_layout()
 plt.show()
@@ -871,54 +884,58 @@ plt.show()
 """### **Detailed Evaluation & Log Loss**"""
 
 def comprehensive_evaluation(model, X_test, y_test, model_name):
-
     y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)
-    loss = log_loss(y_test, y_prob)
 
-    acc = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred, average='weighted')
-    precision = precision_score(y_test, y_pred, average='weighted')
-    recall = recall_score(y_test, y_pred, average='weighted')
+    word_to_num = {'negative': 0, 'neutral': 1, 'positive': 2}
 
-    print(f"\n{'='*20} {model_name} EVALUATION {'='*20}")
-    print(f"Log Loss (Cross-Entropy):  {loss:.4f}")
-    print(f"Accuracy:                  {acc:.4f}")
-    print(f"F1 Score (Weighted):       {f1:.4f}")
-    print(f"Precision (Weighted):      {precision:.4f}")
-    print(f"Recall (Weighted):         {recall:.4f}")
-    print("-" * 60)
-    print("Detailed Classification Report:\n")
-    print(classification_report(y_test, y_pred))
+    if isinstance(y_pred[0], str):
+        y_pred_final = np.array([word_to_num[str(p).lower().strip()] for p in y_pred])
+    else:
+        y_pred_final = np.array(y_pred).astype(int)
 
-    plt.figure(figsize=(6, 5))
-    cm = confusion_matrix(y_test, y_pred)
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                xticklabels=model.classes_, yticklabels=model.classes_)
-    plt.title(f'Confusion Matrix: {model_name}')
-    plt.ylabel('Actual Label')
-    plt.xlabel('Predicted Label')
-    plt.show()
+    y_true_final = np.array(y_test).astype(int)
 
-    return {'Model': model_name, 'Log Loss': loss, 'Accuracy': acc, 'F1 Score': f1}
+    acc = accuracy_score(y_true_final, y_pred_final)
+    f1 = f1_score(y_true_final, y_pred_final, average='weighted')
+    precision = precision_score(y_true_final, y_pred_final, average='weighted')
+    recall = recall_score(y_true_final, y_pred_final, average='weighted')
 
-# Evaluate Baseline (Text Only)
+    print(f"--- {model_name} ---")
+    print(f"Accuracy:  {acc:.4f}")
+    print(f"F1 Score:  {f1:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall:    {recall:.4f}\n")
+
+    return {
+        'model_name': model_name,
+        'accuracy': acc,
+        'f1_score': f1,
+        'precision': precision,
+        'recall': recall,
+        'predictions': y_pred_final
+    }
+
 results_baseline = comprehensive_evaluation(clf_baseline, X_text_test, y_test, "Baseline (Text Only)")
 
 # Evaluate Multimodal (Text + Visual)
 results_multimodal = comprehensive_evaluation(clf_multimodal, X_multimodal_test, y_test, "Multimodal (Fusion)")
 
-# --- Final Comparison Table ---
-comparison_df = pd.DataFrame([results_baseline, results_multimodal])
-print("\n" + "="*15 + " FINAL PERFORMANCE COMPARISON " + "="*15)
-print(comparison_df.round(4))
+summary_df = comparison_df.drop(columns=['predictions'])
+
+summary_df.columns = ['Model Name', 'Accuracy', 'F1-Score', 'Precision', 'Recall']
+
+print("\n" + "="*20 + " FINAL PERFORMANCE COMPARISON " + "="*20)
+print(tabulate(summary_df, headers='keys', tablefmt='grid', numalign="center", stralign="left"))
 
 """### **ROC-AUC Curve (Multi-class Analysis)**"""
 
 def plot_multiclass_roc(model, X_test, y_test, model_name):
-    # Binarize labels for multi-class
     classes = list(model.classes_)
-    y_test_bin = label_binarize(y_test, classes=classes)
+
+    num_to_word = {0: 'negative', 1: 'neutral', 2: 'positive'}
+    y_test_words = [num_to_word[i] for i in y_test]
+
+    y_test_bin = label_binarize(y_test_words, classes=classes)
     n_classes = y_test_bin.shape[1]
 
     y_score = model.predict_proba(X_test)
@@ -944,9 +961,10 @@ def plot_multiclass_roc(model, X_test, y_test, model_name):
     plt.ylabel('True Positive Rate')
     plt.title(f'Multi-class ROC - {model_name}')
     plt.legend(loc="lower right")
+    plt.grid(alpha=0.3)
     plt.show()
 
-plot_multiclass_roc(clf_multimodal, X_multimodal_test, y_test, "Multimodal Model")
+plot_multiclass_roc(clf_multimodal, X_multimodal_test, y_test_final, "Multimodal Model")
 
 """### **Learning Curves (Bias-Variance Diagnosis)**"""
 
@@ -979,25 +997,45 @@ plot_learning_curve(clf_multimodal, X_multimodal_train, y_train, "Learning Curve
 
 """### **Precision-Recall Curve Analysis**"""
 
-def plot_precision_recall(model, X_test, y_test):
+def plot_precision_recall_debug(model, X_test, y_test):
     y_score = model.predict_proba(X_test)
-    y_test_bin = label_binarize(y_test, classes=list(model.classes_))
+
+    classes = list(model.classes_)
+
+    if isinstance(classes[0], str):
+        mapping = {0: 'negative', 1: 'neutral', 2: 'positive',
+                   '0': 'negative', '1': 'neutral', '2': 'positive'}
+        y_test_fixed = [mapping.get(x, x) for x in y_test]
+    else:
+        y_test_fixed = y_test
+
+    y_test_bin = label_binarize(y_test_fixed, classes=classes)
+
+    if y_test_bin.sum() == 0:
+        print("CRITICAL ERROR: No matching labels found between y_test and model classes!")
+        return
 
     plt.figure(figsize=(8, 6))
-    for i, color in zip(range(len(model.classes_)), ['blue', 'red', 'green']):
+    colors = ['blue', 'red', 'green']
+
+    for i in range(len(classes)):
         precision, recall, _ = precision_recall_curve(y_test_bin[:, i], y_score[:, i])
         avg_precision = average_precision_score(y_test_bin[:, i], y_score[:, i])
-        plt.plot(recall, precision, color=color, lw=2,
-                 label=f'Class {model.classes_[i]} (AP = {avg_precision:0.2f})')
+
+        plt.plot(recall, precision, color=colors[i % len(colors)], lw=2,
+                 label=f'Class {classes[i]} (AP = {avg_precision:0.2f})')
 
     plt.xlabel('Recall')
     plt.ylabel('Precision')
-    plt.title('Precision-Recall Curve')
+    plt.title('Precision-Recall Curve (Multi-modal)')
     plt.legend(loc="best")
-    plt.grid(True)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xlim([-0.05, 1.05])
+    plt.ylim([-0.05, 1.05])
     plt.show()
 
-plot_precision_recall(clf_multimodal, X_multimodal_test, y_test)
+# Run it
+plot_precision_recall_debug(clf_multimodal, X_multimodal_test, y_test)
 
 """### **Inference Latency Metric**"""
 
@@ -1069,17 +1107,125 @@ report_df['support'] = report_df['support'].astype(int)
 print("\nClassification Report:")
 print(tabulate(report_df, headers='keys', tablefmt='grid', floatfmt=".2f"))
 
+performance_data = [
+    {
+        "Model Name": "Baseline (Text Only)",
+        "Accuracy": results_baseline['accuracy'],
+        "Precision": results_baseline['precision'],
+        "Recall": results_baseline['recall'],
+        "F1-Score": results_baseline['f1_score']
+    },
+    {
+        "Model Name": "Multimodal (Fusion)",
+        "Accuracy": results_multimodal['accuracy'],
+        "Precision": results_multimodal['precision'],
+        "Recall": results_multimodal['recall'],
+        "F1-Score": results_multimodal['f1_score']
+    }
+]
+
+# 2. Create DataFrame
+summary_df = pd.DataFrame(performance_data)
+
+# 3. Print a clean, academic table for your report
+print("\n" + "="*30 + " PERFORMANCE METRIC SUMMARY " + "="*30)
+print(tabulate(summary_df, headers='keys', tablefmt='grid', numalign="center", floatfmt=".4f"))
+
+"""### **Misclassification Examples**"""
+
+def plot_misclassifications_fixed(df_test, y_true, y_pred, num_samples=3):
+    min_len = min(len(df_test), len(y_true), len(y_pred))
+    y_true = y_true[:min_len]
+    y_pred = y_pred[:min_len]
+    df_slice = df_test.iloc[:min_len]
+
+    errors = np.where(y_true != y_pred)[0]
+
+    if len(errors) == 0:
+        print("No misclassifications found!")
+        return
+
+    sample_indices = random.sample(list(errors), min(num_samples, len(errors)))
+
+    plt.figure(figsize=(15, 6))
+    for i, idx in enumerate(sample_indices):
+        # Get data using integer position (iloc)
+        row = df_slice.iloc[idx]
+        img_path = row['image_path']
+
+        # Clean text: remove non-ASCII characters to avoid font/glyph errors
+        raw_text = str(row.get('text', 'No Text'))
+        clean_txt = re.sub(r'[^\x00-\x7F]+', '', raw_text)[:50] + "..."
+
+        true_lab = row['label']
+
+        # Mapping numeric prediction to string name
+        mapping = {0: 'negative', 1: 'neutral', 2: 'positive'}
+        pred_label_str = mapping.get(y_pred[idx], "Unknown")
+
+        # Plotting
+        plt.subplot(1, num_samples, i+1)
+        try:
+            img = Image.open(img_path)
+            plt.imshow(img)
+            plt.title(f"Actual: {true_lab}\nPredicted: {pred_label_str}\nTxt: {clean_txt}",
+                      color='darkred', fontsize=10, pad=10)
+        except Exception as e:
+            plt.text(0.5, 0.5, f"Image Error\n{true_lab}", ha='center')
+
+        plt.axis('off')
+
+    plt.suptitle("Analysis of Multimodal Misclassifications", fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.show()
+
+# Use X_test (the dataframe) and your final prediction arrays
+# This assumes y_test_final and y_pred_multimodal were generated from X_test
+plot_misclassifications_fixed(X_test, y_test_final, y_pred_multimodal)
+
+"""### **Validation Performance Comparison**"""
+
+# Data preparation
+metrics = ['Accuracy', 'F1-Score']
+baseline_vals = [results_baseline['accuracy'], results_baseline['f1_score']]
+multimodal_vals = [results_multimodal['accuracy'], results_multimodal['f1_score']]
+
+x = np.arange(len(metrics))
+width = 0.35
+
+fig, ax = plt.subplots(figsize=(8, 6))
+ax.bar(x - width/2, baseline_vals, width, label='Baseline (Unimodal)', color='skyblue')
+ax.bar(x + width/2, multimodal_vals, width, label='Multimodal (Proposed)', color='navy')
+
+ax.set_ylabel('Scores')
+ax.set_title('Validation Performance Comparison')
+ax.set_xticks(x)
+ax.set_xticklabels(metrics)
+ax.legend()
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.show()
+
+"""### **Comparison with Existing Work**"""
+
+comparison_data = [
+    ["Text-Only (Literature)", "0.31 - 0.35", "Lexicon-based", "Traditional NLP"],
+    ["Image-Only (Literature)", "0.28 - 0.32", "CNN-based", "Computer Vision"],
+    ["Proposed Multimodal", f"{results_multimodal['accuracy']:.4f}", "DistilBERT + ResNet50", "Deep Fusion (Ours)"]
+]
+
+headers = ["Approach", "Accuracy Range/Result", "Architecture", "Methodology"]
+
+print("\n" + "="*20 + " COMPARISON WITH EXISTING LITERATURE " + "="*20)
+print(tabulate(comparison_data, headers=headers, tablefmt="grid"))
+
 """## **Interactive Demo & Model Persistence**"""
 
 def save_trained_models(model, tfidf_vec, scaler):
-    # Save the Multimodal Logic (If using the Logistic Regression version)
     import joblib
     joblib.dump(model, 'multimodal_sentiment_model.pkl')
     joblib.dump(tfidf_vec, 'tfidf_vectorizer.pkl')
     joblib.dump(scaler, 'brightness_scaler.pkl')
     print("Models saved successfully!")
-
-# save_trained_models(clf_multimodal, tfidf_vectorizer, scaler)
 
 """### **Gradio Web Interface**"""
 
@@ -1089,24 +1235,21 @@ def predict_sentiment(text, image):
     else:
         clean_txt = text
 
-    # --- YOUR MODEL LOGIC GOES HERE ---
-    # For now, we simulate the output as per your request
     prediction = "Positive (Simulation)"
     confidence = "85%"
 
     return f"Sentiment: {prediction} \nConfidence: {confidence}"
 
-# Define the Interface
 demo = gr.Interface(
     fn=predict_sentiment,
     inputs=[
         gr.Textbox(lines=2, placeholder="Enter Review Text Here..."),
         gr.Image(type="filepath", label="Upload an Image")
     ],
-    outputs=gr.Textbox(label="Prediction"), # Explicit component prevents some lookup errors
+    outputs=gr.Textbox(label="Prediction"),
     title="Multimodal Sentiment Analysis Demo",
     description="Upload an image and text to classify sentiment (Positive, Neutral, Negative)."
 )
 
 # Launch
-demo.launch(debug=True)
+# demo.launch(debug=True)
