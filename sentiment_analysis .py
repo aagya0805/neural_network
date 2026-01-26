@@ -1251,5 +1251,5 @@ demo = gr.Interface(
     description="Upload an image and text to classify sentiment (Positive, Neutral, Negative)."
 )
 
-# Launch
-# demo.launch(debug=True)
+Launch
+demo.launch(debug=True)
