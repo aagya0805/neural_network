@@ -160,9 +160,6 @@ label_table = df['label'].value_counts().reset_index()
 label_table.columns = ['Label', 'Count']
 label_table
 
-_df_2.groupby('Label').size().plot(kind='barh', color=sns.palettes.mpl_palette('Dark2'))
-plt.gca().spines[['top', 'right',]].set_visible(False)
-
 """## **Data Cleaning and Preprocessing**
 
 ### **Handling Missing Values**
@@ -860,7 +857,11 @@ def evaluate_model(model, X_test, y_test, model_name):
 
 """### **Comparative Visualization (Confusion Matrix)**"""
 
-y_test_final = np.array(y_test).astype(int)
+X_text_test = X_text_test[:len(y_test_final)]
+X_multimodal_test = X_multimodal_test[:len(y_test_final)]
+
+label_map = {'negative': 0, 'neutral': 1, 'positive': 2}
+y_test_final = np.array([label_map[label] for label in y_test])
 
 y_pred_baseline = evaluate_model(clf_baseline, X_text_test, y_test_final, "Baseline")
 y_pred_multimodal = evaluate_model(clf_multimodal, X_multimodal_test, y_test_final, "Multimodal")
@@ -915,15 +916,33 @@ def comprehensive_evaluation(model, X_test, y_test, model_name):
         'predictions': y_pred_final
     }
 
-results_baseline = comprehensive_evaluation(clf_baseline, X_text_test, y_test, "Baseline (Text Only)")
+label_map = {'negative': 0, 'neutral': 1, 'positive': 2}
+y_test_numeric = np.array([label_map[label] for label in y_test])
 
-# Evaluate Multimodal (Text + Visual)
-results_multimodal = comprehensive_evaluation(clf_multimodal, X_multimodal_test, y_test, "Multimodal (Fusion)")
+results_baseline = comprehensive_evaluation(clf_baseline, X_text_test, y_test_numeric, "Baseline (Text Only)")
 
-summary_df = comparison_df.drop(columns=['predictions'])
+label_map = {'negative': 0, 'neutral': 1, 'positive': 2}
+y_test_numeric = np.array([label_map[label] for label in y_test])
 
-summary_df.columns = ['Model Name', 'Accuracy', 'F1-Score', 'Precision', 'Recall']
+results_multimodal = comprehensive_evaluation(clf_multimodal, X_multimodal_test, y_test_numeric,"Multimodal (Fusion)")
 
+comparison_df = pd.DataFrame([
+    {'Model Name': 'Baseline (Text Only)', 'Accuracy': results_baseline['accuracy'],
+     'F1-Score': results_baseline['f1_score'], 'Precision': results_baseline['precision'],
+     'Recall': results_baseline['recall']},
+
+    {'Model Name': 'Multimodal (Fusion)', 'Accuracy': results_multimodal['accuracy'],
+     'F1-Score': results_multimodal['f1_score'], 'Precision': results_multimodal['precision'],
+     'Recall': results_multimodal['recall']}
+])
+
+# Drop column 'predictions' if it exists (optional)
+if 'predictions' in comparison_df.columns:
+    summary_df = comparison_df.drop(columns=['predictions'])
+else:
+    summary_df = comparison_df
+
+# Print final performance
 print("\n" + "="*20 + " FINAL PERFORMANCE COMPARISON " + "="*20)
 print(tabulate(summary_df, headers='keys', tablefmt='grid', numalign="center", stralign="left"))
 
